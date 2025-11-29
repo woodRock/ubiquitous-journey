@@ -36,31 +36,34 @@
     }, 0);
   }
 
-  onMount(async () => {
-    if ($user) {
-        const userDoc = await getDoc(doc(db, 'users', $user.uid));
-        if (userDoc.exists()) {
-            currentUserData = { id: userDoc.id, ...userDoc.data() } as AppUser;
-        }
-    }
+  $: if ($user) {
+    // Load user data and private key
+    (async () => {
+      const userDoc = await getDoc(doc(db, 'users', $user.uid));
+      if (userDoc.exists()) {
+          currentUserData = { id: userDoc.id, ...userDoc.data() } as AppUser;
+      }
 
-    // Get private key from local storage
-    const privateKeyStr = localStorage.getItem(`privateKey-${$user?.uid}`);
-    if (privateKeyStr) {
-      const privateKeyJwk = JSON.parse(privateKeyStr);
-      privateKey = await crypto.subtle.importKey(
-        'jwk',
-        privateKeyJwk,
-        { name: 'RSA-OAEP', hash: 'SHA-256' },
-        true,
-        ['decrypt']
-      );
-    }
-  });
+      const privateKeyStr = localStorage.getItem(`privateKey-${$user.uid}`);
+      if (privateKeyStr) {
+        const privateKeyJwk = JSON.parse(privateKeyStr);
+        privateKey = await crypto.subtle.importKey(
+          'jwk',
+          privateKeyJwk,
+          { name: 'RSA-OAEP', hash: 'SHA-256' },
+          true,
+          ['decrypt']
+        );
+      } else {
+        // If no private key is found for the new user, reset the variable
+        privateKey = null;
+      }
+    })();
+  }
 
   let unsubscribeMessages: () => void;
 
-  $: if (selectedUser && $user) {
+  $: if (selectedUser && $user && privateKey) {
     if (unsubscribeMessages) {
       unsubscribeMessages();
     }
@@ -77,13 +80,11 @@
         const message = { id: doc.id, ...doc.data() } as Message;
         // Client-side filter for the selected conversation
         if (message.participants.includes(selectedUser.id)) {
-          if (privateKey && message.content && message.content[$user.uid]) {
+          if (message.content && message.content[$user.uid]) {
             try {
               const ciphertext = new Uint8Array(Object.values(message.content[$user.uid]));
               message.decryptedText = await decryptMessage(privateKey, ciphertext.buffer);
             } catch (e) {
-              // Don't log decryption errors for now, as they are expected for own messages before fix
-              // console.error('Decryption failed:', e);
               message.decryptedText = 'Could not decrypt message';
             }
           }
