@@ -2,6 +2,7 @@
   import { auth, db } from '$lib/firebase';
   import { user, otherUsers } from '$lib/stores/userStore';
   import { privateKey } from '$lib/stores/keyStore';
+  import { collection, onSnapshot, addDoc, query, where, orderBy, getDoc, doc } from 'firebase/firestore';
   import {
     importPublicKey,
     encryptMessage,

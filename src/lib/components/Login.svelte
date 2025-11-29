@@ -90,7 +90,7 @@
         privateKeyStore.set(privateKey);
       }
 
-    } catch (e: any)
+    } catch (e: any) {
       error = e.message;
     } finally {
       loading = false;
