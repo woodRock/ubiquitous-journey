@@ -3,6 +3,7 @@
   import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
   import { doc, setDoc } from 'firebase/firestore';
   import { generateKeyPair, exportKey } from '$lib/crypto';
+  import { privateKey as privateKeyStore } from '$lib/stores/keyStore';
   import './Login.css';
 
   let email = '';
@@ -21,18 +22,28 @@
       // Generate and store keys
       console.log('Generating keys...');
       const keyPair = await generateKeyPair();
-      const publicKey = await exportKey(keyPair.publicKey);
-      const privateKey = await exportKey(keyPair.privateKey);
+      const publicKeyStr = await exportKey(keyPair.publicKey);
+      const privateKeyStr = await exportKey(keyPair.privateKey);
       console.log('Keys generated.');
 
       console.log('Writing user to Firestore...');
       await setDoc(doc(db, 'users', user.uid), {
         email: user.email,
-        publicKey: publicKey,
+        publicKey: publicKeyStr,
       });
       console.log('User written to Firestore.');
 
-      localStorage.setItem(`privateKey-${user.uid}`, privateKey);
+      localStorage.setItem(`privateKey-${user.uid}`, privateKeyStr);
+
+      // Also update the key store
+      const privateKey = await crypto.subtle.importKey(
+        'jwk',
+        JSON.parse(privateKeyStr),
+        { name: 'RSA-OAEP', hash: 'SHA-256' },
+        true,
+        ['decrypt']
+      );
+      privateKeyStore.set(privateKey);
 
     } catch (e: any) {
       console.error('Error during sign up:', e);
@@ -55,21 +66,31 @@
         
         // Generate and store a new key pair
         const keyPair = await generateKeyPair();
-        const publicKey = await exportKey(keyPair.publicKey);
-        const privateKey = await exportKey(keyPair.privateKey);
+        const publicKeyStr = await exportKey(keyPair.publicKey);
+        const privateKeyStr = await exportKey(keyPair.privateKey);
         
         // Update the public key in Firestore
         await setDoc(doc(db, 'users', user.uid), {
           email: user.email,
-          publicKey: publicKey,
+          publicKey: publicKeyStr,
         }, { merge: true }); // Use merge: true to avoid overwriting other fields
 
         // Store the new private key locally
-        localStorage.setItem(`privateKey-${user.uid}`, privateKey);
+        localStorage.setItem(`privateKey-${user.uid}`, privateKeyStr);
         console.log('New keys generated and stored for existing user.');
+
+        // Also update the key store
+        const privateKey = await crypto.subtle.importKey(
+            'jwk',
+            JSON.parse(privateKeyStr),
+            { name: 'RSA-OAEP', hash: 'SHA-256' },
+            true,
+            ['decrypt']
+        );
+        privateKeyStore.set(privateKey);
       }
 
-    } catch (e: any) {
+    } catch (e: any)
       error = e.message;
     } finally {
       loading = false;

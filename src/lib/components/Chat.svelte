@@ -1,8 +1,7 @@
 <script lang="ts">
   import { auth, db } from '$lib/firebase';
   import { user, otherUsers } from '$lib/stores/userStore';
-  import { onMount } from 'svelte';
-  import { collection, onSnapshot, addDoc, query, where, orderBy, getDoc, doc } from 'firebase/firestore';
+  import { privateKey } from '$lib/stores/keyStore';
   import {
     importPublicKey,
     encryptMessage,
@@ -25,7 +24,6 @@
   let selectedUser: AppUser | null = null;
   let messages: Message[] = [];
   let newMessage = '';
-  let privateKey: CryptoKey | null = null;
   let currentUserData: AppUser | null = null;
   let chatContainer: HTMLDivElement;
 
@@ -36,34 +34,9 @@
     }, 0);
   }
 
-  $: if ($user) {
-    // Load user data and private key
-    (async () => {
-      const userDoc = await getDoc(doc(db, 'users', $user.uid));
-      if (userDoc.exists()) {
-          currentUserData = { id: userDoc.id, ...userDoc.data() } as AppUser;
-      }
-
-      const privateKeyStr = localStorage.getItem(`privateKey-${$user.uid}`);
-      if (privateKeyStr) {
-        const privateKeyJwk = JSON.parse(privateKeyStr);
-        privateKey = await crypto.subtle.importKey(
-          'jwk',
-          privateKeyJwk,
-          { name: 'RSA-OAEP', hash: 'SHA-256' },
-          true,
-          ['decrypt']
-        );
-      } else {
-        // If no private key is found for the new user, reset the variable
-        privateKey = null;
-      }
-    })();
-  }
-
   let unsubscribeMessages: () => void;
 
-  $: if (selectedUser && $user && privateKey) {
+  $: if (selectedUser && $user && $privateKey) {
     if (unsubscribeMessages) {
       unsubscribeMessages();
     }
@@ -83,7 +56,7 @@
           if (message.content && message.content[$user.uid]) {
             try {
               const ciphertext = new Uint8Array(Object.values(message.content[$user.uid]));
-              message.decryptedText = await decryptMessage(privateKey, ciphertext.buffer);
+              message.decryptedText = await decryptMessage($privateKey, ciphertext.buffer);
             } catch (e) {
               message.decryptedText = 'Could not decrypt message';
             }
@@ -97,6 +70,15 @@
 
   async function sendMessage() {
     if (!newMessage.trim() || !selectedUser || !$user || !currentUserData) return;
+
+    // Get current user data for public key
+    const userDoc = await getDoc(doc(db, 'users', $user.uid));
+    if (userDoc.exists()) {
+        currentUserData = { id: userDoc.id, ...userDoc.data() } as AppUser;
+    } else {
+        console.error("Could not find current user's data in Firestore.");
+        return;
+    }
 
     const recipientPublicKey = await importPublicKey(selectedUser.publicKey);
     const senderPublicKey = await importPublicKey(currentUserData.publicKey);
