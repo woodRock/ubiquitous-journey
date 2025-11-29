@@ -46,7 +46,29 @@
     loading = true;
     error = null;
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // After login, check if the private key exists. If not, this is a new device/browser.
+      if (!localStorage.getItem(`privateKey-${user.uid}`)) {
+        console.log('No private key found for this user on this device. Generating new keys...');
+        
+        // Generate and store a new key pair
+        const keyPair = await generateKeyPair();
+        const publicKey = await exportKey(keyPair.publicKey);
+        const privateKey = await exportKey(keyPair.privateKey);
+        
+        // Update the public key in Firestore
+        await setDoc(doc(db, 'users', user.uid), {
+          email: user.email,
+          publicKey: publicKey,
+        }, { merge: true }); // Use merge: true to avoid overwriting other fields
+
+        // Store the new private key locally
+        localStorage.setItem(`privateKey-${user.uid}`, privateKey);
+        console.log('New keys generated and stored for existing user.');
+      }
+
     } catch (e: any) {
       error = e.message;
     } finally {
