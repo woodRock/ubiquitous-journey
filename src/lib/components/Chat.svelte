@@ -22,64 +22,70 @@
     decryptedText?: string;
   }
 
-  let selectedUser: AppUser | null = null;
-  let messages: Message[] = [];
-  let newMessage = '';
-  let currentUserData: AppUser | null = null;
-  let chatContainer: HTMLDivElement;
+  let selectedUser = $state<AppUser | null>(null);
+  let messages = $state<Message[]>([]);
+  let newMessage = $state('');
+  let currentUserData = $state<AppUser | null>(null);
+  let chatContainer = $state<HTMLDivElement>();
 
-  $: if (messages && chatContainer) {
-    // Use timeout to wait for DOM update before scrolling
-    setTimeout(() => {
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }, 0);
-  }
+  $effect(() => {
+    if (messages && chatContainer) {
+      // Use timeout to wait for DOM update before scrolling
+      setTimeout(() => {
+          chatContainer.scrollTop = chatContainer.scrollHeight;
+      }, 0);
+    }
+  });
+
+  $effect(() => {
+    if ($user) {
+      const userDoc = getDoc(doc(db, 'users', $user.uid));
+      userDoc.then(doc => {
+        if (doc.exists()) {
+          currentUserData = { id: doc.id, ...doc.data() } as AppUser;
+        }
+      });
+    }
+  });
 
   let unsubscribeMessages: () => void;
 
-  $: if (selectedUser && $user && $privateKey) {
-    if (unsubscribeMessages) {
-      unsubscribeMessages();
-    }
-    const messagesCollection = collection(db, 'messages');
-    const q = query(
-      messagesCollection,
-      where('participants', 'array-contains', $user.uid),
-      orderBy('timestamp', 'asc')
-    );
-
-    unsubscribeMessages = onSnapshot(q, async (snapshot) => {
-      const allMessages: Message[] = [];
-      for (const doc of snapshot.docs) {
-        const message = { id: doc.id, ...doc.data() } as Message;
-        // Client-side filter for the selected conversation
-        if (message.participants.includes(selectedUser.id)) {
-          if (message.content && message.content[$user.uid]) {
-            try {
-              const ciphertext = new Uint8Array(Object.values(message.content[$user.uid]));
-              message.decryptedText = await decryptMessage($privateKey, ciphertext.buffer);
-            } catch (e) {
-              message.decryptedText = 'Could not decrypt message';
-            }
-          }
-          allMessages.push(message);
-        }
+  $effect(() => {
+    if (selectedUser && $user && $privateKey) {
+      if (unsubscribeMessages) {
+        unsubscribeMessages();
       }
-      messages = allMessages;
-    });
-  }
+      const messagesCollection = collection(db, 'messages');
+      const q = query(
+        messagesCollection,
+        where('participants', 'array-contains', $user.uid),
+        orderBy('timestamp', 'asc')
+      );
+
+      unsubscribeMessages = onSnapshot(q, async (snapshot) => {
+        const allMessages: Message[] = [];
+        for (const doc of snapshot.docs) {
+          const message = { id: doc.id, ...doc.data() } as Message;
+          // Client-side filter for the selected conversation
+          if (message.participants.includes(selectedUser.id)) {
+            if (message.content && message.content[$user.uid]) {
+              try {
+                const ciphertext = new Uint8Array(Object.values(message.content[$user.uid]));
+                message.decryptedText = await decryptMessage($privateKey, ciphertext.buffer);
+              } catch (e) {
+                message.decryptedText = 'Could not decrypt message';
+              }
+            }
+            allMessages.push(message);
+          }
+        }
+        messages = allMessages;
+      });
+    }
+  });
 
   async function sendMessage() {
     if (!newMessage.trim() || !selectedUser || !$user || !currentUserData) return;
-
-    // Get current user data for public key
-    const userDoc = await getDoc(doc(db, 'users', $user.uid));
-    if (userDoc.exists()) {
-        currentUserData = { id: userDoc.id, ...userDoc.data() } as AppUser;
-    } else {
-        console.error("Could not find current user's data in Firestore.");
-        return;
-    }
 
     const recipientPublicKey = await importPublicKey(selectedUser.publicKey);
     const senderPublicKey = await importPublicKey(currentUserData.publicKey);
@@ -112,7 +118,7 @@
     <h2>Encrypted Chat</h2>
     <div class="header-user-info">
       <p>Welcome, {$user?.email}</p>
-      <button on:click={logout} class="logout-button">Logout</button>
+      <button onclick={logout} class="logout-button">Logout</button>
     </div>
   </div>
 
@@ -121,9 +127,9 @@
     <div class="user-list">
       <h3>Contacts</h3>
       <ul>
-        {#each $otherUsers as u}
+        {#each $otherUsers as u (u.id)}
           <li>
-            <button on:click={() => (selectedUser = u)} class="user-button" class:selected={selectedUser?.id === u.id}>
+            <button onclick={() => (selectedUser = u)} class="user-button" class:selected={selectedUser?.id === u.id}>
               <span class="avatar avatar-small">
                 <img alt="Avatar" src={`https://api.dicebear.com/8.x/initials/svg?seed=${u.email}`} />
               </span>
@@ -144,7 +150,7 @@
           <h3>Chat with {selectedUser.email}</h3>
         </div>
         <div class="messages-container" bind:this={chatContainer}>
-          {#each messages as message}
+          {#each messages as message (message.id)}
             <div class="message-row" class:sent={$user?.uid === message.from}>
               <div class="message" class:sent={$user?.uid === message.from} class:received={$user?.uid !== message.from}>
                 <p>{message.decryptedText || '...'}</p>
@@ -153,8 +159,8 @@
           {/each}
         </div>
         <div class="chat-input-area">
-          <input type="text" bind:value={newMessage} placeholder="Type a message..." class="chat-input" on:keydown={(e) => e.key === 'Enter' && sendMessage()} />
-          <button on:click={sendMessage} aria-label="Send message" class="send-button">
+          <input type="text" bind:value={newMessage} placeholder="Type a message..." class="chat-input" onkeydown={(e) => e.key === 'Enter' && sendMessage()} />
+          <button onclick={sendMessage} aria-label="Send message" class="send-button">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
           </button>
         </div>
